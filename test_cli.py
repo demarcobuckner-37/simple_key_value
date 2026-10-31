@@ -31,12 +31,12 @@ class TestCLI(unittest.TestCase):
     def test_set_get_exists_and_missing(self):
         self.assertEqual(self.run_db('SET fruit apple', 'GET fruit', 'EXISTS fruit',
                                      'GET absent', 'EXISTS absent'),
-                         ['Done', 'apple', '1', 'NULL', '0'])
+                         ['Done', 'apple', '1', '', '0'])
 
     def test_delete_and_persistence(self):
         self.assertEqual(self.run_db('SET fruit apple', 'DEL fruit', 'EXISTS fruit'),
                          ['Done', '1', '0'])
-        self.assertEqual(self.run_db('GET fruit'), ['NULL'])
+        self.assertEqual(self.run_db('GET fruit'), [''])
 
     def test_set_persistence_and_last_write_wins(self):
         self.run_db('SET fruit apple', 'SET fruit banana')
@@ -44,7 +44,7 @@ class TestCLI(unittest.TestCase):
 
     def test_mset_mget_and_recovery(self):
         self.assertEqual(self.run_db('MSET a apple b banana', 'MGET a b missing'),
-                         ['OK', 'apple', 'banana', 'NULL'])
+                         ['OK', 'apple', 'banana', 'nil'])
         self.assertEqual(self.run_db('MGET a b'), ['apple', 'banana'])
 
     def test_counters_and_recovery(self):
@@ -75,8 +75,8 @@ class TestCLI(unittest.TestCase):
     def test_expire_and_ttl(self):
         self.assertEqual(self.run_db('SET old apple', 'EXPIRE old -5',
                                      'EXISTS old', 'TTL old'),
-                         ['Done', 'OK', '0', '-2'])
-        self.assertEqual(self.run_db('GET old'), ['NULL'])
+                         ['Done', '1', '0', '-2'])
+        self.assertEqual(self.run_db('GET old'), [''])
 
     def test_set_clears_ttl_across_restart(self):
         self.run_db('SET key apple', 'EXPIRE key 300', 'SET key banana')
@@ -86,7 +86,7 @@ class TestCLI(unittest.TestCase):
         self.assertEqual(self.run_db('SET range_c cherry', 'SET range_a apple',
                                      'SET range_b banana', 'EXPIRE range_b -5',
                                      'RANGE range_a range_c'),
-                         ['Done', 'Done', 'Done', 'OK', 'range_a apple', 'range_c cherry'])
+                         ['Done', 'Done', 'Done', '1', 'range_a', 'range_c', 'END'])
 
     def test_abort_discards_changes(self):
         self.assertEqual(self.run_db('SET key original', 'BEGIN',
@@ -119,6 +119,33 @@ class TestCLI(unittest.TestCase):
         self.assertEqual(self.run_db('RPUSH fruits apple', 'RPUSH fruits banana',
                                      'LRANGE fruits -10 -1'),
                          ['OK', 'OK', 'apple', 'banana'])
+
+    def test_incr_decr_missing_keys_and_recovery(self):
+        self.assertEqual(self.run_db('INCR newcount', 'DECR othercount',
+                                     'GET newcount', 'GET othercount'),
+                         ['1', '-1', '1', '-1'])
+        self.assertEqual(self.run_db('GET newcount', 'GET othercount'), ['1', '-1'])
+
+    def test_lpop_and_recovery(self):
+        self.assertEqual(self.run_db('RPUSH queue first', 'RPUSH queue second',
+                                     'LPOP queue', 'LRANGE queue 0 -1'),
+                         ['OK', 'OK', 'first', 'second'])
+        self.assertEqual(self.run_db('LRANGE queue 0 -1', 'LPOP queue', 'LPOP queue'),
+                         ['second', 'second', 'nil'])
+        self.assertEqual(self.run_db('LPOP queue'), ['nil'])
+
+    def test_lpop_transaction_abort_and_commit(self):
+        self.run_db('RPUSH queue first', 'RPUSH queue second')
+        self.assertEqual(self.run_db('BEGIN', 'LPOP queue', 'ABORT',
+                                     'LRANGE queue 0 -1'),
+                         ['OK', 'first', 'OK', 'first', 'second'])
+        self.assertEqual(self.run_db('BEGIN', 'LPOP queue', 'COMMIT',
+                                     'LRANGE queue 0 -1'),
+                         ['OK', 'first', 'OK', 'second'])
+        self.assertEqual(self.run_db('LRANGE queue 0 -1'), ['second'])
+
+    def test_range_empty_has_end_marker(self):
+        self.assertEqual(self.run_db('RANGE a z'), ['END'])
 
 
 if __name__ == '__main__':
