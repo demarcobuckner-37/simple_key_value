@@ -1,6 +1,5 @@
 import time
 import unittest
-from unittest.mock import patch
 
 from index import Index
 
